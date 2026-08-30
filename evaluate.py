@@ -1,13 +1,7 @@
 def load_ground_truth(filename):
-    """
-    Read entries like:
-
-    0.0,C
-    1.8,G
-    3.5,Am
-    """
 
     truth = []
+    end_time = None
 
     with open(filename, "r") as file:
 
@@ -20,14 +14,22 @@ def load_ground_truth(filename):
 
             time_text, chord = line.split(",")
 
+            time_value = float(time_text)
+            chord = chord.strip()
+
+            if chord.upper() == "END":
+                end_time = time_value
+                continue
+
             truth.append(
                 (
-                    float(time_text),
-                    chord.strip()
+                    time_value,
+                    chord
                 )
             )
 
-    return truth
+    return truth, end_time
+        
 
 
 def base_chord(chord):
@@ -125,9 +127,16 @@ def evaluate(
     ground_truth,
     predictions,
     duration,
+    evaluation_end=None,
     step=0.125,
     boundary_tolerance=0.30
 ):
+
+    if evaluation_end is not None:
+        duration = min(
+            duration,
+            evaluation_end
+        )
 
     total = 0
 
