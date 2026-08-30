@@ -3,6 +3,10 @@ import sys
 import librosa
 import numpy as np
 
+from evaluate import (
+    load_ground_truth,
+    evaluate
+)
 
 NOTE_NAMES = [
     "C", "C#", "D", "D#", "E", "F",
@@ -1202,6 +1206,48 @@ def analyze_song(
         f"Final chord changes: "
         f"{final_changes}"
     )
+
+        # ==========================================
+    # EVALUATION
+    # ==========================================
+
+    try:
+
+        ground_truth = load_ground_truth(
+            "ground_truth.txt"
+        )
+
+        predictions = []
+
+        previous = None
+
+        for i, chord in enumerate(
+            decoded
+        ):
+
+            if chord != previous:
+
+                predictions.append(
+                    (
+                        frame_times[i],
+                        chord
+                    )
+                )
+
+                previous = chord
+
+        evaluate(
+            ground_truth,
+            predictions,
+            duration
+        )
+
+    except FileNotFoundError:
+
+        print()
+        print(
+            "No ground_truth.txt found."
+        )
 
 
 # ==================================================
