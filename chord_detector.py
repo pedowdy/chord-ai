@@ -116,6 +116,10 @@ def detect_key(chroma):
 
     for root in range(12):
 
+        # --------------------------
+        # Major key
+        # --------------------------
+
         major_template = np.zeros(12)
 
         for interval in MAJOR_SCALE:
@@ -136,6 +140,10 @@ def detect_key(chroma):
                 root,
                 "major"
             )
+
+        # --------------------------
+        # Minor key
+        # --------------------------
 
         minor_template = np.zeros(12)
 
@@ -181,6 +189,7 @@ def chord_key_bonus(
 
     if key_type == "major":
 
+        # I and IV major-family chords
         if (
             relative_root in [0, 5]
             and chord_type in [
@@ -191,6 +200,7 @@ def chord_key_bonus(
         ):
             return 0.04
 
+        # V and V7
         if (
             relative_root == 7
             and chord_type in [
@@ -200,6 +210,7 @@ def chord_key_bonus(
         ):
             return 0.04
 
+        # ii, iii, vi minor-family chords
         if (
             relative_root in [2, 4, 9]
             and chord_type in [
@@ -212,6 +223,7 @@ def chord_key_bonus(
 
     else:
 
+        # i, iv, v
         if (
             relative_root in [0, 5, 7]
             and chord_type in [
@@ -222,6 +234,7 @@ def chord_key_bonus(
         ):
             return 0.04
 
+        # III, VI, VII
         if (
             relative_root in [3, 8, 10]
             and chord_type in [
@@ -236,7 +249,7 @@ def chord_key_bonus(
 
 
 # ==================================================
-# BASS
+# BASS DETECTION
 # ==================================================
 
 def detect_bass_note(
@@ -317,10 +330,18 @@ def score_chord(
         )
     )
 
+    # --------------------------
+    # Chord-template match
+    # --------------------------
+
     audio_match = cosine_similarity(
         chroma,
         template
     )
+
+    # --------------------------
+    # Penalize unexplained notes
+    # --------------------------
 
     non_chord_mask = (
         template == 0
@@ -339,10 +360,15 @@ def score_chord(
         * 0.16
     )
 
+    # --------------------------
+    # Bass evidence
+    # --------------------------
+
     bass_bonus = 0.0
 
     if bass_note is not None:
 
+        # Root position
         if bass_note == root:
 
             bass_bonus += (
@@ -350,6 +376,7 @@ def score_chord(
                 * bass_strength
             )
 
+        # Inversion
         elif template[
             bass_note
         ] == 1:
@@ -359,12 +386,20 @@ def score_chord(
                 * bass_strength
             )
 
+    # --------------------------
+    # Key context
+    # --------------------------
+
     key_bonus = chord_key_bonus(
         root,
         chord_type,
         key_root,
         key_type
     )
+
+    # --------------------------
+    # Extension penalty
+    # --------------------------
 
     extension_penalty = 0.0
 
@@ -377,6 +412,10 @@ def score_chord(
     ]:
 
         extension_penalty = 0.035
+
+    # --------------------------
+    # Final chord score
+    # --------------------------
 
     final_score = (
         audio_match
@@ -456,7 +495,9 @@ def transition_score(
     templates
 ):
 
+    # Staying on exactly the same chord
     if previous_chord == new_chord:
+
         return 0.075
 
     previous_root = templates[
@@ -471,8 +512,10 @@ def transition_score(
         "root"
     ]
 
+    # Normal chord change
     score = -0.035
 
+    # Same root, different quality
     if previous_root == new_root:
 
         return -0.020
@@ -482,6 +525,7 @@ def transition_score(
         - previous_root
     ) % 12
 
+    # Fifth / fourth motion
     if interval in [
         5,
         7
@@ -493,7 +537,7 @@ def transition_score(
 
 
 # ==================================================
-# VITERBI
+# VITERBI SEQUENCE DECODING
 # ==================================================
 
 def decode_sequence(
@@ -530,6 +574,10 @@ def decode_sequence(
         dtype=int
     )
 
+    # --------------------------
+    # First frame
+    # --------------------------
+
     for i, chord in enumerate(
         chord_names
     ):
@@ -542,6 +590,10 @@ def decode_sequence(
         ][
             chord
         ]
+
+    # --------------------------
+    # Dynamic programming
+    # --------------------------
 
     for frame in range(
         1,
@@ -593,6 +645,10 @@ def decode_sequence(
                 new_index
             ] = best_previous
 
+    # --------------------------
+    # Backtrack best path
+    # --------------------------
+
     best_index = int(
         np.argmax(
             dp[-1]
@@ -636,10 +692,11 @@ def enforce_minimum_duration(
     minimum_frames=4
 ):
     """
-    4 frames x 0.125 sec = 0.5 seconds.
+    4 frames x 0.125 seconds = 0.5 seconds.
 
-    Short chord segments are treated as
-    suspicious and merged into a neighbor.
+    Chord segments shorter than this are
+    treated as suspicious and merged into
+    one of their neighbors.
     """
 
     result = decoded.copy()
@@ -653,6 +710,10 @@ def enforce_minimum_duration(
         segments = []
 
         start = 0
+
+        # --------------------------
+        # Find chord segments
+        # --------------------------
 
         for i in range(
             1,
@@ -675,6 +736,10 @@ def enforce_minimum_duration(
 
                 start = i
 
+        # --------------------------
+        # Find short segments
+        # --------------------------
+
         for segment_index, (
             start,
             end,
@@ -688,6 +753,7 @@ def enforce_minimum_duration(
             )
 
             if length >= minimum_frames:
+
                 continue
 
             previous_chord = None
@@ -727,20 +793,27 @@ def enforce_minimum_duration(
                 )
 
             # --------------------------
-            # Only one neighbor
+            # Only next neighbor exists
             # --------------------------
 
             elif previous_chord is None:
 
-                replacement = next_chord
+                replacement = (
+                    next_chord
+                )
+
+            # --------------------------
+            # Only previous neighbor exists
+            # --------------------------
 
             elif next_chord is None:
 
-                replacement = previous_chord
+                replacement = (
+                    previous_chord
+                )
 
             # --------------------------
-            # Choose whichever neighbor
-            # fits the short segment better
+            # Choose better neighbor
             # --------------------------
 
             else:
@@ -784,6 +857,10 @@ def enforce_minimum_duration(
                         next_chord
                     )
 
+            # --------------------------
+            # Replace short segment
+            # --------------------------
+
             for frame in range(
                 start,
                 end
@@ -800,7 +877,130 @@ def enforce_minimum_duration(
 
 
 # ==================================================
-# ANALYZE
+# EARLY ROOT-CHANGE CORRECTION
+# ==================================================
+
+def correct_early_root_changes(
+    decoded,
+    raw_chords,
+    frame_scores,
+    templates
+):
+    """
+    Viterbi can occasionally move a chord change
+    slightly earlier than the local audio supports.
+
+    If Viterbi changes to a new ROOT, but the raw
+    audio still supports the previous root for at
+    least two consecutive frames, temporarily keep
+    the raw chords in that run.
+
+    Example:
+
+        raw:      F6
+        Viterbi:  Dm
+
+    If the previous decoded chord was also rooted on F,
+    this prevents the Dm change from occurring too early.
+    """
+
+    result = decoded.copy()
+
+    i = 1
+
+    while i < len(decoded):
+
+        previous_chord = result[
+            i - 1
+        ]
+
+        current_chord = decoded[
+            i
+        ]
+
+        previous_root = templates[
+            previous_chord
+        ][
+            "root"
+        ]
+
+        current_root = templates[
+            current_chord
+        ][
+            "root"
+        ]
+
+        # No root change occurred
+        if current_root == previous_root:
+
+            i += 1
+            continue
+
+        supported_frames = []
+        frame = i
+
+        while frame < len(decoded):
+
+            raw_chord = raw_chords[
+                frame
+            ]
+
+            raw_root = templates[
+                raw_chord
+            ][
+                "root"
+            ]
+
+            if raw_root != previous_root:
+
+                break
+
+            raw_score = frame_scores[
+                frame
+            ][
+                raw_chord
+            ]
+
+            decoded_score = frame_scores[
+                frame
+            ][
+                decoded[
+                    frame
+                ]
+            ]
+
+            if raw_score <= decoded_score + 0.01:
+
+                break
+
+            supported_frames.append(
+                frame
+            )
+
+            frame += 1
+
+        # Require persistent local evidence across
+        # two 0.125-second frames.
+        if len(supported_frames) < 2:
+
+            i += 1
+            continue
+
+        for frame in supported_frames:
+
+            result[
+                frame
+            ] = raw_chords[
+                frame
+            ]
+
+        i = supported_frames[-1] + 1
+
+    return result
+
+
+# ==================================================
+# ANALYZE SONG
 # ==================================================
 
 def analyze_song(
@@ -811,10 +1011,18 @@ def analyze_song(
         f"Loading: {filename}"
     )
 
+    # ------------------------------------------------
+    # LOAD AUDIO
+    # ------------------------------------------------
+
     y, sr = librosa.load(
         filename,
         mono=True
     )
+
+    # ------------------------------------------------
+    # HARMONIC EXTRACTION
+    # ------------------------------------------------
 
     harmonic = (
         librosa.effects.harmonic(
@@ -823,12 +1031,20 @@ def analyze_song(
         )
     )
 
+    # ------------------------------------------------
+    # FULL-RANGE CHROMA
+    # ------------------------------------------------
+
     chroma = (
         librosa.feature.chroma_cqt(
             y=harmonic,
             sr=sr
         )
     )
+
+    # ------------------------------------------------
+    # LOW-RANGE BASS CHROMA
+    # ------------------------------------------------
 
     bass_chroma = (
         librosa.feature.chroma_cqt(
@@ -846,7 +1062,7 @@ def analyze_song(
     )
 
     # ------------------------------------------------
-    # KEY
+    # KEY DETECTION
     # ------------------------------------------------
 
     average_song_chroma = (
@@ -884,7 +1100,7 @@ def analyze_song(
     )
 
     # ------------------------------------------------
-    # FRAMES
+    # FRAME ANALYSIS
     # ------------------------------------------------
 
     duration = (
@@ -939,6 +1155,7 @@ def analyze_song(
         ]
 
         if section.shape[1] == 0:
+
             continue
 
         average_chroma = np.mean(
@@ -1008,7 +1225,7 @@ def analyze_song(
     )
 
     # ------------------------------------------------
-    # NEW v1.2 MINIMUM DURATION
+    # v1.2 MINIMUM DURATION
     # ------------------------------------------------
 
     decoded = enforce_minimum_duration(
@@ -1018,7 +1235,129 @@ def analyze_song(
     )
 
     # ------------------------------------------------
-    # PRINT CHORDS
+    # NEW EXPERIMENT:
+    # EARLY ROOT-CHANGE CORRECTION
+    # ------------------------------------------------
+
+    decoded = correct_early_root_changes(
+        decoded,
+        raw_chords,
+        frame_scores,
+        templates
+    )
+
+    # ------------------------------------------------
+    # DEBUG SEQUENCE DECISIONS
+    # ------------------------------------------------
+
+    debug_times = [
+        11.125,
+        11.250,
+        31.500,
+        31.750,
+        32.000,
+        32.250,
+        35.625,
+        36.500
+    ]
+
+    print()
+    print("Sequence decision debug:")
+    print("------------------------")
+
+    for debug_time in debug_times:
+
+        closest_index = min(
+            range(
+                len(frame_times)
+            ),
+            key=lambda i: abs(
+                frame_times[i]
+                - debug_time
+            )
+        )
+
+        raw_chord = raw_chords[
+            closest_index
+        ]
+
+        viterbi_chord = (
+            pre_duration_decoded[
+                closest_index
+            ]
+        )
+
+        final_chord = decoded[
+            closest_index
+        ]
+
+        print(
+            f"{frame_times[closest_index]:.3f}s  "
+            f"raw: {raw_chord:<7} "
+            f"viterbi: {viterbi_chord:<7} "
+            f"final: {final_chord:<7}"
+        )
+
+    # ------------------------------------------------
+    # DEBUG CHORD SCORES
+    # ------------------------------------------------
+
+    print()
+    print("Debug chord scores:")
+    print("-------------------")
+
+    for debug_time in debug_times:
+
+        closest_index = min(
+            range(
+                len(frame_times)
+            ),
+            key=lambda i: abs(
+                frame_times[i]
+                - debug_time
+            )
+        )
+
+        scores = frame_scores[
+            closest_index
+        ]
+
+        best_chords = sorted(
+            scores,
+            key=scores.get,
+            reverse=True
+        )[:5]
+
+        bass_note = frame_bass_notes[
+            closest_index
+        ]
+
+        if bass_note is None:
+
+            bass_name = "?"
+
+        else:
+
+            bass_name = NOTE_NAMES[
+                bass_note
+            ]
+
+        print()
+
+        print(
+            f"{frame_times[closest_index]:.3f}s "
+            f"bass: {bass_name}"
+        )
+
+        for chord in best_chords:
+
+            print(
+                f"    {chord:<7} "
+                f"{scores[chord]:.4f}"
+            )
+
+    # ------------------------------------------------
+    # PRINT DETECTED CHORDS
     # ------------------------------------------------
 
     print()
@@ -1032,9 +1371,12 @@ def analyze_song(
     ):
 
         if chord == previous:
+
             continue
 
-        time = frame_times[i]
+        time = frame_times[
+            i
+        ]
 
         minutes = int(
             time // 60
@@ -1044,9 +1386,9 @@ def analyze_song(
             time % 60
         )
 
-        bass_note = (
-            frame_bass_notes[i]
-        )
+        bass_note = frame_bass_notes[
+            i
+        ]
 
         if bass_note is None:
 
@@ -1054,11 +1396,9 @@ def analyze_song(
 
         else:
 
-            bass_name = (
-                NOTE_NAMES[
-                    bass_note
-                ]
-            )
+            bass_name = NOTE_NAMES[
+                bass_note
+            ]
 
         match = (
             frame_audio_matches[
@@ -1093,7 +1433,9 @@ def analyze_song(
 
     viterbi_changes = sum(
         pre_duration_decoded[i]
-        != pre_duration_decoded[i - 1]
+        != pre_duration_decoded[
+            i - 1
+        ]
 
         for i in range(
             1,
@@ -1105,7 +1447,9 @@ def analyze_song(
 
     final_changes = sum(
         decoded[i]
-        != decoded[i - 1]
+        != decoded[
+            i - 1
+        ]
 
         for i in range(
             1,
