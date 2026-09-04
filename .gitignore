@@ -9,3 +9,6 @@ __pycache__/
 *.ogg
 output/
 results/
+experiments/v2/dataset/inbox/
+*.npy
+*.npz
