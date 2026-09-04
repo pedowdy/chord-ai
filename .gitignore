@@ -12,3 +12,4 @@ results/
 experiments/v2/dataset/inbox/
 *.npy
 *.npz
+local_audio/
