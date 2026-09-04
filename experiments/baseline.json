@@ -1,0 +1,27 @@
+{
+  "Let It Be": {
+    "root": 94.2,
+    "base": 94.2,
+    "exact": 90.4
+  },
+  "Day 1": {
+    "root": 91.2,
+    "base": 91.2,
+    "exact": 61.0
+  },
+  "Stand by Me": {
+    "root": 85.4,
+    "base": 83.8,
+    "exact": 73.1
+  },
+  "Just the Two of Us": {
+    "root": 67.9,
+    "base": 60.6,
+    "exact": 8.3
+  },
+  "Hotel California": {
+    "root": 98.9,
+    "base": 87.9,
+    "exact": 85.6
+  }
+}

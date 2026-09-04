@@ -3,3 +3,9 @@
 *.wav
 __pycache__/
 .DS_Store
+*.m4a
+*.flac
+*.aac
+*.ogg
+output/
+results/

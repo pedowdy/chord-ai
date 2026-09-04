@@ -1,9 +1,11 @@
 import sys
+from pathlib import Path
 
 import librosa
 import numpy as np
 
 from evaluate import (
+    ground_truth_path,
     load_ground_truth,
     evaluate
 )
@@ -12,6 +14,14 @@ from evaluate import (
 NOTE_NAMES = [
     "C", "C#", "D", "D#", "E", "F",
     "F#", "G", "G#", "A", "A#", "B"
+]
+
+
+DAY1_QUALITY_DIAGNOSTICS = [
+    (4.88, 5.62, "A#", "A#m"),
+    (10.12, 11.25, "G#", "G#m7"),
+    (16.00, 16.88, "A#", "A#m7"),
+    (17.62, 18.88, "D#m", "D#maj7"),
 ]
 
 
@@ -414,10 +424,50 @@ def score_chord(
         extension_penalty = 0.035
 
     # --------------------------
+    # Third-quality evidence
+    # --------------------------
+
+    quality_penalty = 0.0
+    minor_types = ("m", "m6", "m7")
+    major_extended_types = ("maj7",)
+
+    if chord_type in minor_types + major_extended_types:
+
+        minor_third = float(normalized[(root + 3) % 12])
+        major_third = float(normalized[(root + 4) % 12])
+        chord_third = (
+            minor_third
+            if chord_type in minor_types
+            else major_third
+        )
+        competing_third = (
+            major_third
+            if chord_type in minor_types
+            else minor_third
+        )
+
+        weak_third = max(0.0, 0.25 - chord_third) / 0.25
+        relative_weakness = max(
+            0.0,
+            competing_third - chord_third
+        )
+        if (
+            chord_type in major_extended_types
+            or major_third > minor_third + 0.02
+            or (
+                chord_type in ("m6", "m7")
+                and minor_third < 0.06
+            )
+        ):
+            quality_penalty = 0.090 * weak_third * (
+                0.75 + 0.25 * relative_weakness
+            )
+
+    # --------------------------
     # Final chord score
     # --------------------------
 
-    final_score = (
+    pre_quality_score = (
         audio_match
         + bass_bonus
         + key_bonus
@@ -425,9 +475,15 @@ def score_chord(
         - extension_penalty
     )
 
+    final_score = (
+        pre_quality_score
+        - quality_penalty
+    )
+
     return (
         final_score,
-        audio_match
+        audio_match,
+        pre_quality_score
     )
 
 
@@ -451,6 +507,7 @@ def score_frame(
     )
 
     scores = {}
+    pre_quality_scores = {}
     audio_matches = {}
 
     for (
@@ -460,7 +517,8 @@ def score_frame(
 
         (
             score,
-            audio_match
+            audio_match,
+            pre_quality_score
         ) = score_chord(
             chroma,
             bass_note,
@@ -474,15 +532,118 @@ def score_frame(
             chord_name
         ] = score
 
+        pre_quality_scores[
+            chord_name
+        ] = pre_quality_score
+
         audio_matches[
             chord_name
         ] = audio_match
 
     return (
         scores,
+        pre_quality_scores,
         audio_matches,
         bass_note
     )
+
+
+def print_day1_quality_diagnostics(
+    filename,
+    frame_times,
+    frame_chroma,
+    frame_scores
+):
+
+    if Path(filename).name != "day1_intro.mp3":
+        return
+
+    print()
+    print("Day 1 major/minor evidence:")
+    print("---------------------------")
+
+    for start, end, expected, predicted_full in (
+        DAY1_QUALITY_DIAGNOSTICS
+    ):
+        indices = [
+            i for i, time in enumerate(frame_times)
+            if start <= time <= end
+        ]
+
+        if not indices:
+            continue
+
+        average = np.mean(
+            [frame_chroma[i] for i in indices],
+            axis=0
+        )
+        normalized = average / (
+            np.max(average) + 1e-9
+        )
+
+        root_name = expected[:2]
+        if root_name not in NOTE_NAMES:
+            root_name = expected[:1]
+        root = NOTE_NAMES.index(root_name)
+
+        expected_type = expected[len(root_name):]
+        predicted_type = predicted_full[len(root_name):]
+        minor_types = ("m", "m6", "m7")
+        expected_base = (
+            root_name + "m"
+            if expected_type in minor_types
+            else root_name
+        )
+        predicted_base = (
+            root_name + "m"
+            if predicted_type in minor_types
+            else root_name
+        )
+
+        tones = [
+            ("root", 0),
+            ("m3", 3),
+            ("M3", 4),
+            ("5", 7),
+        ]
+
+        for chord in (expected, predicted_full):
+            chord_type = chord[len(root_name):]
+            for interval in CHORD_TYPES[chord_type]:
+                if interval not in (0, 3, 4, 7):
+                    extension_name = {
+                        9: "6",
+                        10: "m7",
+                        11: "maj7",
+                    }[interval]
+                    tones.append((extension_name, interval))
+
+        expected_score = np.mean([
+            frame_scores[i][expected_base]
+            for i in indices
+        ])
+        predicted_score = np.mean([
+            frame_scores[i][predicted_base]
+            for i in indices
+        ])
+
+        evidence = "  ".join(
+            f"{label}({NOTE_NAMES[(root + interval) % 12]})="
+            f"{normalized[(root + interval) % 12]:.3f}"
+            for label, interval in tones
+        )
+
+        print(
+            f"{start:05.2f}-{end:05.2f}s  "
+            f"{expected} -> {predicted_full}"
+        )
+        print(f"    chroma: {evidence}")
+        print(
+            f"    mean base score: "
+            f"{expected_base}={expected_score:.4f}  "
+            f"{predicted_base}={predicted_score:.4f}  "
+            f"delta={predicted_score - expected_score:+.4f}"
+        )
 
 
 # ==================================================
@@ -518,6 +679,18 @@ def transition_score(
     # Same root, different quality
     if previous_root == new_root:
 
+        minor_types = ("m", "m6", "m7")
+        previous_type = previous_chord[len(NOTE_NAMES[previous_root]):]
+        new_type = new_chord[len(NOTE_NAMES[new_root]):]
+        changes_major_minor_family = (
+            (previous_type in minor_types)
+            != (new_type in minor_types)
+        )
+
+        if changes_major_minor_family:
+
+            return -0.030
+
         return -0.020
 
     interval = (
@@ -542,25 +715,49 @@ def transition_score(
 
 def decode_sequence(
     frame_scores,
-    templates
+    frame_pre_quality_scores,
+    templates,
+    filename=None,
+    frame_times=None
 ):
 
-    chord_names = list(
-        templates.keys()
-    )
+    chord_names = list(templates.keys())
+    roots = list(range(len(NOTE_NAMES)))
+    chords_by_root = {
+        root: [
+            chord for chord in chord_names
+            if templates[chord]["root"] == root
+        ]
+        for root in roots
+    }
+
+    def root_emission(frame, root):
+
+        root_name = NOTE_NAMES[root]
+        triad_emission = max(
+            frame_pre_quality_scores[frame][root_name],
+            frame_pre_quality_scores[frame][root_name + "m"]
+        )
+        extended_emission = max(
+            frame_pre_quality_scores[frame][chord]
+            for chord in chords_by_root[root]
+        )
+
+        return min(
+            extended_emission,
+            triad_emission + 0.275
+        )
 
     frame_count = len(
         frame_scores
     )
 
-    chord_count = len(
-        chord_names
-    )
+    root_count = len(roots)
 
     dp = np.full(
         (
             frame_count,
-            chord_count
+            root_count
         ),
         -np.inf
     )
@@ -568,7 +765,7 @@ def decode_sequence(
     backpointer = np.full(
         (
             frame_count,
-            chord_count
+            root_count
         ),
         -1,
         dtype=int
@@ -578,18 +775,12 @@ def decode_sequence(
     # First frame
     # --------------------------
 
-    for i, chord in enumerate(
-        chord_names
-    ):
+    for root in roots:
 
         dp[
             0,
-            i
-        ] = frame_scores[
-            0
-        ][
-            chord
-        ]
+            root
+        ] = root_emission(0, root)
 
     # --------------------------
     # Dynamic programming
@@ -600,50 +791,80 @@ def decode_sequence(
         frame_count
     ):
 
-        for new_index, new_chord in enumerate(
-            chord_names
-        ):
+        for new_root in roots:
 
-            emission = frame_scores[
-                frame
-            ][
-                new_chord
-            ]
+            emission = root_emission(frame, new_root)
 
             best_score = -np.inf
             best_previous = -1
 
-            for old_index, old_chord in enumerate(
-                chord_names
-            ):
+            for old_root in roots:
+
+                if old_root == new_root:
+                    transition = 0.075
+                else:
+                    transition = -0.035
+                    if (new_root - old_root) % 12 in (5, 7):
+                        transition += 0.015
 
                 candidate = (
                     dp[
                         frame - 1,
-                        old_index
+                        old_root
                     ]
-                    + transition_score(
-                        old_chord,
-                        new_chord,
-                        templates
-                    )
+                    + transition
                     + emission
                 )
 
                 if candidate > best_score:
 
                     best_score = candidate
-                    best_previous = old_index
+                    best_previous = old_root
 
             dp[
                 frame,
-                new_index
+                new_root
             ] = best_score
 
             backpointer[
                 frame,
-                new_index
+                new_root
             ] = best_previous
+
+    if (
+        filename is not None
+        and Path(filename).name == "day1_intro.mp3"
+        and frame_times is not None
+    ):
+
+        diagnostic_roots = (3, 8)
+
+        print()
+        print("Day 1 Viterbi DP diagnostic (17.0-19.0s):")
+        print("------------------------------------------")
+
+        for frame, frame_time in enumerate(frame_times):
+
+            if not 17.0 <= frame_time <= 19.0:
+                continue
+
+            print(f"{frame_time:.3f}s")
+
+            for root in diagnostic_roots:
+                previous_root = backpointer[frame, root]
+                previous_name = (
+                    "START"
+                    if previous_root < 0
+                    else NOTE_NAMES[previous_root]
+                )
+                emission = root_emission(frame, root)
+
+                print(
+                    f"    {NOTE_NAMES[root]:<3} "
+                    f"emission={emission:+.6f}  "
+                    f"dp={dp[frame, root]:+.6f}  "
+                    f"previous={previous_name}"
+                )
 
     # --------------------------
     # Backtrack best path
@@ -676,10 +897,31 @@ def decode_sequence(
 
     path.reverse()
 
-    return [
-        chord_names[index]
-        for index in path
-    ]
+    decoded = []
+
+    for frame, root in enumerate(path):
+
+        candidates = chords_by_root[root]
+        root_name = NOTE_NAMES[root]
+
+        if (
+            frame_scores[frame][root_name + "m"]
+            > frame_scores[frame][root_name]
+        ):
+            candidates = [
+                chord
+                for chord in candidates
+                if chord != root_name + "maj7"
+            ]
+
+        decoded.append(
+            max(
+                candidates,
+                key=frame_scores[frame].get
+            )
+        )
+
+    return decoded
 
 
 # ==================================================
@@ -906,6 +1148,41 @@ def correct_early_root_changes(
 
     result = decoded.copy()
 
+    # Apply the same local-evidence check at the beginning
+    # of the song, where there is no previous decoded frame.
+    initial_decoded_root = templates[
+        decoded[0]
+    ][
+        "root"
+    ]
+    initial_raw_root = templates[
+        raw_chords[0]
+    ][
+        "root"
+    ]
+
+    if initial_raw_root != initial_decoded_root:
+
+        supported_frames = []
+
+        for frame, raw_chord in enumerate(raw_chords):
+
+            if templates[raw_chord]["root"] != initial_raw_root:
+                break
+
+            raw_score = frame_scores[frame][raw_chord]
+            decoded_score = frame_scores[frame][decoded[frame]]
+
+            if raw_score <= decoded_score + 0.01:
+                break
+
+            supported_frames.append(frame)
+
+        if len(supported_frames) >= 3:
+
+            for frame in supported_frames:
+                result[frame] = raw_chords[frame]
+
     i = 1
 
     while i < len(decoded):
@@ -1115,9 +1392,11 @@ def analyze_song(
     )
 
     frame_scores = []
+    frame_pre_quality_scores = []
     frame_audio_matches = []
     frame_bass_notes = []
     frame_times = []
+    frame_chroma = []
 
     for start_time in np.arange(
         0,
@@ -1170,6 +1449,7 @@ def analyze_song(
 
         (
             scores,
+            pre_quality_scores,
             matches,
             bass_note
         ) = score_frame(
@@ -1184,6 +1464,10 @@ def analyze_song(
             scores
         )
 
+        frame_pre_quality_scores.append(
+            pre_quality_scores
+        )
+
         frame_audio_matches.append(
             matches
         )
@@ -1194,6 +1478,10 @@ def analyze_song(
 
         frame_times.append(
             start_time
+        )
+
+        frame_chroma.append(
+            average_chroma
         )
 
     # ------------------------------------------------
@@ -1217,7 +1505,10 @@ def analyze_song(
 
     decoded = decode_sequence(
         frame_scores,
-        templates
+        frame_pre_quality_scores,
+        templates,
+        filename=filename,
+        frame_times=frame_times
     )
 
     pre_duration_decoded = (
@@ -1244,6 +1535,13 @@ def analyze_song(
         raw_chords,
         frame_scores,
         templates
+    )
+
+    print_day1_quality_diagnostics(
+        filename,
+        frame_times,
+        frame_chroma,
+        frame_scores
     )
 
     # ------------------------------------------------
@@ -1488,7 +1786,7 @@ def analyze_song(
             ground_truth,
             evaluation_end
         ) = load_ground_truth(
-            "ground_truth.txt"
+            ground_truth_path(filename)
         )
 
         predictions = []
@@ -1522,7 +1820,7 @@ def analyze_song(
 
         print()
         print(
-            "No ground_truth.txt found."
+            "No ground-truth annotation found."
         )
 
 

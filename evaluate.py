@@ -1,3 +1,16 @@
+from pathlib import Path
+
+
+def ground_truth_path(audio_filename):
+
+    song_annotation = Path(audio_filename).with_suffix(".txt")
+
+    if song_annotation.is_file():
+        return song_annotation
+
+    return Path("ground_truth.txt")
+
+
 def load_ground_truth(filename):
 
     truth = []
@@ -146,6 +159,7 @@ def evaluate(
 
     skipped = 0
     mistakes = []
+    right_root_wrong_quality = []
 
     time = 0.0
 
@@ -202,6 +216,19 @@ def evaluate(
                     predicted
                 )
             )
+
+            if (
+                root_note(predicted)
+                == root_note(expected)
+            ):
+
+                right_root_wrong_quality.append(
+                    (
+                        time,
+                        expected,
+                        predicted
+                    )
+                )
 
         time += step
 
@@ -284,4 +311,70 @@ def evaluate(
             f"{time:05.2f}s  "
             f"expected: {expected:<5} "
             f"got: {predicted}"
+        )
+
+    print()
+    print(
+        "Right root, wrong base/quality:"
+    )
+
+    if not right_root_wrong_quality:
+        print("None")
+        return
+
+    spans = []
+
+    for (
+        frame_time,
+        expected,
+        predicted
+    ) in right_root_wrong_quality:
+
+        if (
+            spans
+            and expected == spans[-1][2]
+            and predicted == spans[-1][3]
+            and abs(
+                frame_time
+                - spans[-1][1]
+                - step
+            ) < 1e-9
+        ):
+            spans[-1] = (
+                spans[-1][0],
+                frame_time,
+                expected,
+                predicted
+            )
+        else:
+            spans.append(
+                (
+                    frame_time,
+                    frame_time,
+                    expected,
+                    predicted
+                )
+            )
+
+    for (
+        start_time,
+        end_time,
+        expected,
+        predicted
+    ) in spans:
+
+        if end_time == start_time:
+            time_text = f"{start_time:05.2f}s"
+        else:
+            time_text = (
+                f"{start_time:05.2f}-"
+                f"{end_time:05.2f}s"
+            )
+
+        print(
+            f"{time_text:<14} "
+            f"expected: {expected:<6} "
+            f"got: {predicted:<6} "
+            f"base: {base_chord(expected)} -> "
+            f"{base_chord(predicted)}"
         )
