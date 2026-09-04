@@ -59,9 +59,7 @@ The current benchmark set includes annotated sections from:
 - **Just the Two of Us** — Grover Washington Jr. feat. Bill Withers
 - **Hotel California** — Eagles
 
-The original commercial audio is **not included in this repository**.
-
-Only manually created annotation and evaluation data are stored here.
+The original commercial audio is **not included in this repository**. Only manually created annotation and evaluation data are stored here.
 
 ## Evaluation Philosophy
 
@@ -102,3 +100,73 @@ chord-ai/
 │
 ├── .gitignore
 └── README.md
+```
+
+## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/pedowdy/chord-ai.git
+cd chord-ai
+```
+
+Create a virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the required Python packages:
+
+```bash
+pip install numpy librosa
+```
+
+Additional dependencies may be required as the project develops.
+
+## Usage
+
+The project is still under active development, so the command-line interface may change.
+
+The main detector implementation is located in `chord_detector.py`.
+
+Evaluation tools are located in `evaluate.py` and `benchmark_suite.py`.
+
+## Current Development
+
+Current work is focused on improving:
+
+- Chord-root estimation
+- Transition timing
+- Bass interpretation
+- Chord-family classification
+- Robustness across different recordings and musical styles
+
+A newer dataset pipeline is also being explored for future learned models using richer harmonic and bass features.
+
+## Limitations
+
+Chord transcription from real recordings is difficult because the audio may contain:
+
+- Melody notes outside the chord
+- Inversions
+- Extensions
+- Passing tones
+- Distorted or layered instruments
+- Ambiguous harmony
+- Imperfect tuning
+- Rapid chord transitions
+
+The detector should therefore be considered experimental rather than production-ready.
+
+## Why I Built This
+
+I started this project as a way to combine programming with music theory and audio analysis.
+
+The goal is to better understand how chord-recognition systems work and to progressively improve the detector using measurable experiments rather than manually tuning it until individual songs happen to work.
+
+## License
+
+No license has currently been selected.
